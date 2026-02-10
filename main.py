@@ -42,7 +42,7 @@ def extract_features(ear, mar):
 alert, tired = [], []
 for i in range(1, 6):
     for j in range(1, 3):
-        filename = f'raw_features_{i}_{j}.json'
+        filename = f'files/raw_features_{i}_{j}.json'
         try:
             with open(filename, 'r') as f:
                 data = json.load(f)

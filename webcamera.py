@@ -1,103 +1,81 @@
-import json
-import numpy as np
-from sklearn.svm import SVC
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score
+import cv2
+import mediapipe as mp
+from scipy.spatial import distance
+import time
+
+left_eye = [362, 385, 387, 263, 373, 380]
+right_eye = [33, 160, 158, 133, 153, 144]
+
+def calculate_ear(eye):
+    A = distance.euclidean(eye[1], eye[5])
+    B = distance.euclidean(eye[2], eye[4])
+    C = distance.euclidean(eye[0], eye[3])
+    ear = (A + B) / (2.0 * C)
+    return ear
+
+def calculate_mar(landmarks, w, h):
+    upp = landmarks.landmark[13]
+    low = landmarks.landmark[14]
+    left = landmarks.landmark[78]
+    right = landmarks.landmark[308]
+    upper_point = (int(upp.x * w), int(upp.y * h))
+    lower_point = (int(low.x * w), int(low.y * h))
+    left_point = (int(left.x * w), int(left.y * h))
+    right_point = (int(right.x * w), int(right.y * h))
+    return distance.euclidean(upper_point, lower_point) / distance.euclidean(left_point, right_point)
+
+def get_landmarks_coords(landmarks, ind, w, h):
+    coords = []
+    for i in ind:
+        landmark = landmarks.landmark[i]
+        coords.append((int(landmark.x * w), int(landmark.y * h)))
+    return coords
 
 
-window = 180
-step = 60
 
-def count_yawns(mar_values):
-    yawn_count = 0
-    yawn_in_progress = False
-    yawn_frames = 0
-    for mar in mar_values:
-        if mar > 0.6:
-            if not yawn_in_progress:
-                yawn_in_progress = True
-                yawn_frames = 1
+yawn_counter = 0
+yawn_in_progress = False
+yawn_start_time = None
+
+mp_face_mesh = mp.solutions.face_mesh
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5,min_tracking_confidence=0.5)
+
+s = 0
+cap = cv2.VideoCapture(s)
+while cv2.waitKey(1) != ord('q'):
+    ret, frame = cap.read()
+    frame = cv2.resize(frame, (640, 480))
+    frame = cv2.flip(frame, 1)
+    h, w, _ = frame.shape
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    results = face_mesh.process(rgb_frame)
+
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            mp_drawing.draw_landmarks(image=frame,landmark_list=face_landmarks,connections=mp_face_mesh.FACEMESH_TESSELATION,landmark_drawing_spec=None,connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style())
+            left_eye_coords = get_landmarks_coords(face_landmarks, left_eye, w, h)
+            right_eye_coords = get_landmarks_coords(face_landmarks, right_eye, w, h)
+            left_ear = calculate_ear(left_eye_coords)
+            right_ear = calculate_ear(right_eye_coords)
+            avg_ear = (left_ear + right_ear) / 2.0
+            mar = calculate_mar(face_landmarks, w, h)
+            cv2.putText(frame, "Ear: {:.2f}".format(avg_ear),(10,60),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+            cv2.putText(frame, "Mar: {:.2f}".format(mar),(10,30),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+            cv2.putText(frame, "Yawn_counter: {:.2f}".format(yawn_counter), (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            if mar > 0.6:
+                if not yawn_in_progress:
+                    yawn_start_time = time.time()
+                    yawn_in_progress = True
             else:
-                yawn_frames += 1
-        else:
-            if yawn_in_progress and yawn_frames >= 45:
-                yawn_count += 1
-            yawn_in_progress = False
-            yawn_frames = 0
-    return yawn_count
-
-def extract_features(ear, mar):
-    perclos = sum(1 for e in ear if e < 0.2) / len(ear)
-    return [
-        np.mean(ear),
-        np.min(ear),
-        np.std(ear),
-        perclos,
-        np.mean(mar),
-        np.max(mar),
-        count_yawns(mar)
-    ]
-
-alert, tired = [], []
-for i in range(1, 6):
-    for j in range(1, 3):
-        filename = f'raw_features_{i}_{j}.json'
-        try:
-            with open(filename, 'r') as f:
-                data = json.load(f)
-                alert.extend(data['alert'])
-                tired.extend(data['tired'])
-        except FileNotFoundError:
-            continue
-
-X_w, y_w = [], []
-for video in alert + tired:
-    ear_v, mar_v, label = video['ear_values'], video['mar_values'], video['label']
-    if len(ear_v) < window:
-        continue
-    for i in range(0, len(ear_v) - window, step):
-        X_w.append(extract_features(ear_v[i:i + window], mar_v[i:i + window]))
-        y_w.append(label)
-
-X_w, y_w = np.array(X_w), np.array(y_w)
-scaler_w = StandardScaler()
-X_w_scaled = scaler_w.fit_transform(X_w)
-
-model_w = SVC(kernel='rbf', C=1.0, probability=True, random_state=42)
-model_w.fit(X_w_scaled, y_w)
-
-X_v, y_v = [], []
-for video in alert + tired:
-    ear_v, mar_v = video['ear_values'], video['mar_values']
-    if len(ear_v) < window: continue
-    preds = []
-    for i in range(0, len(ear_v) - window, step):
-        feat = extract_features(ear_v[i:i + window], mar_v[i:i + window])
-        preds.append(model_w.predict(scaler_w.transform([feat]))[0])
-
-    if not preds:
-        continue
-    preds = np.array(preds)
-    X_v.append([
-        np.mean(preds),
-        np.mean(preds[:len(preds) // 2]),
-        np.mean(preds[len(preds) // 2:]),
-        1 if np.sum(preds) > (len(preds) * 0.5) else 0
-    ])
-    y_v.append(video['label'])
-
-X_v, y_v = np.array(X_v), np.array(y_v)
-X_train_v, X_test_v, y_train_v, y_test_v = train_test_split(X_v, y_v, test_size=0.2, random_state=42, stratify=y_v)
-
-scaler_v = StandardScaler()
-X_train_v_scaled = scaler_v.fit_transform(X_train_v)
-X_test_v_scaled = scaler_v.transform(X_test_v)
-
-model_v = SVC(kernel='rbf', C=1.0, random_state=42)
-model_v.fit(X_train_v_scaled, y_train_v)
-
-y_pred_v = model_v.predict(X_test_v_scaled)
-
-print(f"Точность обучения по видео: {accuracy_score(y_test_v, y_pred_v) * 100:.2f}%")
-
+                if yawn_in_progress:
+                    yawn_duration = time.time() - yawn_start_time
+                    if yawn_duration >= 1.5:
+                        yawn_counter += 1
+                    yawn_in_progress = False
+    cv2.imshow('frame', frame)
+cap.release()
+cv2.destroyAllWindows()
+face_mesh.close()
