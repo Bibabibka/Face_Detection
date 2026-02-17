@@ -33,11 +33,38 @@ $$MAR = \frac{\|p_{upper} - p_{lower}\|}{\|p_{left} - p_{right}\|}$$
 * `scanner.py`: Извлечение признаков из видеоархива и сохранение в JSON
 * `main.py`: Обучение моделей SVC
 * `check.py`: Тестирование модели на новых данных
-* `webcamera.py`: Демонстрация на вебкамере как сканируются фаойлы
+* `webcamera.py`: Демонстрация работы на вебкамере
 
 ## Результаты
 В ходе тестирования была достигнута точность:
 **Accuracy = 83.33%**
 
 ---
+## Запуск
 
+### 1. Подготовка окружения
+
+```bash
+python -m venv Face-detection
+.\Face-detection\Scripts\activate
+```
+
+### 2. Установка зависимостей
+
+```bash
+python.exe -m pip install --upgrade pip
+pip install opencv-python numpy mediapipe scipy scikit-learn  
+```
+
+### 3. Скачивание репозитория
+```bash
+git clone https://github.com/Bibabibka/Face_Detection.git
+cd Face_Detection
+```
+
+### 4. Запуск программы
+```bash
+python3 webcamera.py
+```
+Далее после того как вы закончили съемку нажмите на 'q' для получения результата вашего состояния
+(Раскладка должна быть на английском)
